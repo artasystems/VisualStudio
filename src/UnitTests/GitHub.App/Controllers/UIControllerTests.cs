@@ -24,7 +24,7 @@ public class UIControllerTests
         [Fact]
         public void WithMultipleCallsDoesNotThrowException()
         {
-            var uiProvider = Substitute.For<IUIProvider>();
+            var uiProvider = Substitute.For<IGitHubServiceProvider>();
             var hosts = Substitute.For<IRepositoryHosts>();
             var factory = Substitute.For<IUIFactory>();
             var cm = Substitutes.ConnectionManager;
@@ -133,7 +133,7 @@ public class UIControllerTests
             var cons = new ObservableCollection<IConnection>();
             cm.Connections.Returns(cons);
 
-            using (var uiController = new UIController((IUIProvider)provider, hosts, factory, cm))
+            using (var uiController = new UIController((IGitHubServiceProvider)provider, hosts, factory, cm))
             {
                 var count = 0;
                 var flow = uiController.SelectFlow(UIControllerFlow.Clone);
@@ -168,7 +168,7 @@ public class UIControllerTests
             // simulate being logged in
             cons.Add(SetupConnection(provider, hosts, hosts.GitHubHost));
 
-            using (var uiController = new UIController((IUIProvider)provider, hosts, factory, cm))
+            using (var uiController = new UIController((IGitHubServiceProvider)provider, hosts, factory, cm))
             {
                 var count = 0;
                 var flow = uiController.SelectFlow(UIControllerFlow.Clone);
@@ -200,7 +200,7 @@ public class UIControllerTests
             var cons = new ObservableCollection<IConnection>();
             cm.Connections.Returns(cons);
 
-            using (var uiController = new UIController((IUIProvider)provider, hosts, factory, cm))
+            using (var uiController = new UIController((IGitHubServiceProvider)provider, hosts, factory, cm))
             {
                 var count = 0;
                 var flow = uiController.SelectFlow(UIControllerFlow.Authentication);
@@ -236,7 +236,7 @@ public class UIControllerTests
             var cons = new ObservableCollection<IConnection> { connection };
             cm.Connections.Returns(cons);
 
-            using (var uiController = new UIController((IUIProvider)provider, hosts, factory, cm))
+            using (var uiController = new UIController((IGitHubServiceProvider)provider, hosts, factory, cm))
             {
                 var count = 0;
                 var flow = uiController.SelectFlow(UIControllerFlow.Authentication);
@@ -268,7 +268,7 @@ public class UIControllerTests
             var cons = new ObservableCollection<IConnection>();
             cm.Connections.Returns(cons);
 
-            using (var uiController = new UIController((IUIProvider)provider, hosts, factory, cm))
+            using (var uiController = new UIController((IGitHubServiceProvider)provider, hosts, factory, cm))
             {
                 var count = 0;
                 var flow = uiController.SelectFlow(UIControllerFlow.Clone);
@@ -306,7 +306,7 @@ public class UIControllerTests
             var cons = new ObservableCollection<IConnection>();
             cm.Connections.Returns(cons);
 
-            using (var uiController = new UIController((IUIProvider)provider, hosts, factory, cm))
+            using (var uiController = new UIController((IGitHubServiceProvider)provider, hosts, factory, cm))
             {
                 var count = 0;
                 var flow = uiController.SelectFlow(UIControllerFlow.Clone);
@@ -352,7 +352,7 @@ public class UIControllerTests
             var cons = new ObservableCollection<IConnection>();
             cm.Connections.Returns(cons);
 
-            using (var uiController = new UIController((IUIProvider)provider, hosts, factory, cm))
+            using (var uiController = new UIController((IGitHubServiceProvider)provider, hosts, factory, cm))
             {
                 var count = 0;
                 var flow = uiController.SelectFlow(UIControllerFlow.Clone);
@@ -421,7 +421,7 @@ public class UIControllerTests
             // simulate being logged in
             cons.Add(SetupConnection(provider, hosts, hosts.GitHubHost));
 
-            using (var uiController = new UIController((IUIProvider)provider, hosts, factory, cm))
+            using (var uiController = new UIController((IGitHubServiceProvider)provider, hosts, factory, cm))
             {
                 var count = 0;
                 var flow = uiController.SelectFlow(UIControllerFlow.Clone);
@@ -459,7 +459,7 @@ public class UIControllerTests
             // simulate being logged in
             cons.Add(SetupConnection(provider, hosts, hosts.GitHubHost));
 
-            using (var uiController = new UIController((IUIProvider)provider, hosts, factory, cm))
+            using (var uiController = new UIController((IGitHubServiceProvider)provider, hosts, factory, cm))
             {
                 var count = 0;
                 var flow = uiController.SelectFlow(UIControllerFlow.Create);
@@ -498,7 +498,7 @@ public class UIControllerTests
             // simulate being logged in
             cons.Add(connection);
 
-            using (var uiController = new UIController((IUIProvider)provider, hosts, factory, cm))
+            using (var uiController = new UIController((IGitHubServiceProvider)provider, hosts, factory, cm))
             {
                 var count = 0;
                 var flow = uiController.SelectFlow(UIControllerFlow.Publish);
@@ -509,7 +509,7 @@ public class UIControllerTests
                     {
                         case 1:
                             Assert.IsAssignableFrom<IViewFor<IRepositoryPublishViewModel>>(uc);
-                            ((IUIProvider)provider).Received().AddService(uiController, connection);
+                            ((IGitHubServiceProvider)provider).Received().AddService(uiController, connection);
                             TriggerDone(uc);
                             break;
                     }
@@ -535,7 +535,7 @@ public class UIControllerTests
             // simulate being logged in
             cons.Add(connection);
 
-            using (var uiController = new UIController((IUIProvider)provider, hosts, factory, cm))
+            using (var uiController = new UIController((IGitHubServiceProvider)provider, hosts, factory, cm))
             {
                 var count = 0;
                 var flow = uiController.SelectFlow(UIControllerFlow.Publish);
@@ -546,7 +546,7 @@ public class UIControllerTests
                     {
                         case 1:
                             Assert.IsAssignableFrom<IViewFor<IRepositoryPublishViewModel>>(uc);
-                            ((IUIProvider)provider).Received().AddService(uiController, connection);
+                            ((IGitHubServiceProvider)provider).Received().AddService(uiController, connection);
                             TriggerDone(uc);
                             break;
                     }
@@ -575,7 +575,7 @@ public class UIControllerTests
             // simulate being logged in
             cons.Add(SetupConnection(provider, hosts, hosts.GitHubHost));
 
-            using (var uiController = new UIController((IUIProvider)provider, hosts, factory, cm))
+            using (var uiController = new UIController((IGitHubServiceProvider)provider, hosts, factory, cm))
             {
                 var count = 0;
                 bool? success = null;
@@ -652,7 +652,7 @@ public class UIControllerTests
             // simulate being logged in
             cons.Add(SetupConnection(provider, hosts, hosts.GitHubHost));
 
-            using (var uiController = new UIController((IUIProvider)provider, hosts, factory, cm))
+            using (var uiController = new UIController((IGitHubServiceProvider)provider, hosts, factory, cm))
             {
                 var count = 0;
                 bool? success = null;
@@ -719,7 +719,7 @@ public class UIControllerTests
             // simulate being logged in
             cons.Add(SetupConnection(provider, hosts, host, true, false));
 
-            using (var uiController = new UIController((IUIProvider)provider, hosts, factory, cm))
+            using (var uiController = new UIController((IGitHubServiceProvider)provider, hosts, factory, cm))
             {
                 var count = 0;
                 bool? success = null;
@@ -784,7 +784,7 @@ public class UIControllerTests
             // simulate being logged in
             cons.Add(SetupConnection(provider, hosts, hosts.GitHubHost, true, true));
 
-            using (var uiController = new UIController((IUIProvider)provider, hosts, factory, cm))
+            using (var uiController = new UIController((IGitHubServiceProvider)provider, hosts, factory, cm))
             {
                 var count = 0;
                 bool? success = null;

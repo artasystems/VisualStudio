@@ -16,7 +16,7 @@ namespace GitHub.Extensions
         /// <returns>The service, or null if not found</returns>
         public static object TryGetService(this IServiceProvider serviceProvider, Type type)
         {
-            var ui = serviceProvider as IUIProvider;
+            var ui = serviceProvider as IGitHubServiceProvider;
             if (ui != null)
                 return ui.TryGetService(type);
 
@@ -48,7 +48,7 @@ namespace GitHub.Extensions
         }
         public static T GetExportedValue<T>(this IServiceProvider serviceProvider) where T : class
         {
-            var ui = serviceProvider as IUIProvider;
+            var ui = serviceProvider as IGitHubServiceProvider;
             return ui != null
                 ? ui.TryGetService(typeof(T)) as T
                 : VisualStudio.Services.ComponentModel.DefaultExportProvider.GetExportedValueOrDefault<T>();

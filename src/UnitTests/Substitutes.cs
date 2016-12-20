@@ -100,7 +100,7 @@ namespace UnitTests
             IRepositoryCreationService creationService = null,
             IAvatarProvider avatarProvider = null)
         {
-            var ret = Substitute.For<IServiceProvider, IUIProvider>();
+            var ret = Substitute.For<IServiceProvider, IGitHubServiceProvider>();
 
             var gitservice = IGitService;
             var cm = Substitute.For<SComponentModel, IComponentModel>();

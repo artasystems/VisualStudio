@@ -57,8 +57,8 @@ namespace GitHub.VisualStudio.TeamExplorer.Connect
 
         void StartFlow(UIControllerFlow controllerFlow)
         {
-            var uiProvider = ServiceProvider.GetService<IUIProvider>();
-            uiProvider.RunUI(controllerFlow, null);
+            var uiProvider = ServiceProvider.GetService<IGitHubServiceProvider>().GetService<IUIProvider>();
+            uiProvider.RunInDialog(controllerFlow);
         }
 
         void OnThemeChanged()

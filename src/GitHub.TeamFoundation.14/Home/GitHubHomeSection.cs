@@ -79,15 +79,15 @@ namespace GitHub.VisualStudio.TeamExplorer.Home
             var teServices = ServiceProvider.GetExportedValue<ITeamExplorerServices>();
             notifications.AddListener(teServices);
 
+            ServiceProvider.GetExportedValue<IGitHubServiceProvider>().GitServiceProvider = ServiceProvider;
             var uiProvider = ServiceProvider.GetExportedValue<IUIProvider>();
-            uiProvider.GitServiceProvider = ServiceProvider;
-            uiProvider.SetupUI(controllerFlow, null);
-            uiProvider.ListenToCompletionState()
+            var controller = uiProvider.Configure(controllerFlow);
+            controller.ListenToCompletionState()
                 .Subscribe(success =>
                 {
                     Refresh();
                 });
-            uiProvider.RunUI();
+            controller.Start();
 
             notifications.RemoveListener();
         }

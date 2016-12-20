@@ -58,14 +58,14 @@ public class GitHubPaneViewModelTests : TestBaseClass
         menuCommandService = new FakeMenuCommandService();
         serviceProvider.GetService(typeof(IMenuCommandService)).Returns(menuCommandService);
 
-        var uiProvider = serviceProvider as IUIProvider;
-        uiProvider.TryGetService(typeof(IUIProvider)).Returns(serviceProvider);
+        var uiProvider = serviceProvider as IGitHubServiceProvider;
+        uiProvider.TryGetService(typeof(IGitHubServiceProvider)).Returns(serviceProvider);
 
         uiController = Substitute.For<IUIController>();
         uiController.CurrentFlow.Returns(UIControllerFlow.PullRequests);
         uiController.SelectedFlow.Returns(UIControllerFlow.PullRequests);
         uiController
-            .When(x => x.Jump(Arg.Any<ViewWithData>()))
+            .When(x => x.LoadView(Arg.Any<ViewWithData>()))
             .Do(x => lastUiControllerJump = x.Arg<ViewWithData>().ViewType);
 
         var exportFactoryProvider = Substitutes.ExportFactoryProvider;

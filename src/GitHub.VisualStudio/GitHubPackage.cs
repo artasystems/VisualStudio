@@ -96,7 +96,7 @@ namespace GitHub.VisualStudio
     [NullGuard.NullGuard(NullGuard.ValidationFlags.None)]
     [PackageRegistration(UseManagedResourcesOnly = true, AllowsBackgroundLoading = true)]
     [ProvideService(typeof(IMenuProvider), IsAsyncQueryable = true)]
-    [ProvideService(typeof(IUIProvider), IsAsyncQueryable = true)]
+    [ProvideService(typeof(IGitHubServiceProvider), IsAsyncQueryable = true)]
     [ProvideService(typeof(IUsageTracker), IsAsyncQueryable = true)]
     [ProvideAutoLoad(UIContextGuids.NoSolution)]
     [ProvideAutoLoad(UIContextGuids.SolutionExists)]
@@ -134,7 +134,7 @@ namespace GitHub.VisualStudio
 
         protected override Task InitializeAsync(CancellationToken cancellationToken, IProgress<ServiceProgressData> progress)
         {
-            AddService(typeof(IUIProvider), CreateService, true);
+            AddService(typeof(IGitHubServiceProvider), CreateService, true);
             AddService(typeof(IUsageTracker), CreateService, true);
             AddService(typeof(IMenuProvider), CreateService, true);
             return Task.CompletedTask;
@@ -145,7 +145,7 @@ namespace GitHub.VisualStudio
             if (serviceType == null)
                 return null;
 
-            if (serviceType == typeof(IUIProvider))
+            if (serviceType == typeof(IGitHubServiceProvider))
             {
                 var result = new GitHubServiceProvider(this);
                 await result.Initialize();
@@ -153,18 +153,18 @@ namespace GitHub.VisualStudio
             }
             else if (serviceType == typeof(IMenuProvider))
             {
-                var sp = await GetServiceAsync(typeof(IUIProvider)) as IUIProvider;
+                var sp = await GetServiceAsync(typeof(IGitHubServiceProvider)) as IGitHubServiceProvider;
                 return new MenuProvider(sp);
             }
             else if (serviceType == typeof(IUsageTracker))
             {
-                var uiProvider = await GetServiceAsync(typeof(IUIProvider)) as IUIProvider;
+                var uiProvider = await GetServiceAsync(typeof(IGitHubServiceProvider)) as IGitHubServiceProvider;
                 return new UsageTracker(uiProvider);
             }
             // go the mef route
             else
             {
-                var sp = await GetServiceAsync(typeof(IUIProvider)) as IUIProvider;
+                var sp = await GetServiceAsync(typeof(IGitHubServiceProvider)) as IGitHubServiceProvider;
                 return sp.TryGetService(serviceType);
             }
         }

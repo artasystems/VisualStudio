@@ -366,10 +366,10 @@ namespace GitHub.VisualStudio.TeamExplorer.Connect
             var teServices = ServiceProvider.GetExportedValue<ITeamExplorerServices>();
             notifications.AddListener(teServices);
 
+            ServiceProvider.GetService<IGitHubServiceProvider>().GitServiceProvider = ServiceProvider;
             var uiProvider = ServiceProvider.GetService<IUIProvider>();
-            uiProvider.GitServiceProvider = ServiceProvider;
-            uiProvider.SetupUI(controllerFlow, SectionConnection);
-            uiProvider.ListenToCompletionState()
+            var controller = uiProvider.Configure(controllerFlow, SectionConnection);
+            controller.ListenToCompletionState()
                 .Subscribe(success =>
                 {
                     if (success)
@@ -380,7 +380,7 @@ namespace GitHub.VisualStudio.TeamExplorer.Connect
                             isCreating = true;
                     }
                 });
-            uiProvider.RunUI();
+            controller.Start();
 
             notifications.RemoveListener();
         }

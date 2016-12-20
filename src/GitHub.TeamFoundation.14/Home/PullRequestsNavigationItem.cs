@@ -34,7 +34,7 @@ namespace GitHub.VisualStudio.TeamExplorer.Home
         public override void Execute()
         {
             var menu = menuProvider.Menus.FirstOrDefault(m => m.IsMenuType(MenuType.OpenPullRequests));
-            menu?.Activate(UIControllerFlow.PullRequests);
+            menu?.Activate(UIControllerFlow.PullRequestList);
             base.Execute();
         }
     }

@@ -20,11 +20,6 @@ using System.Linq;
 
 namespace GitHub.Controllers
 {
-    using App.Factories;
-    using System.Globalization;
-    using System.Windows.Controls;
-    using StateMachineType = StateMachine<UIViewType, UIController.Trigger>;
-
     /*
         This class creates views and associated viewmodels for each UI we have,
         and controls the UI logic graph. It uses various state machines to define
@@ -87,23 +82,22 @@ namespace GitHub.Controllers
         here, but because we have a small number of triggers, it's not a huge deal.
     */
 
-    [Export(typeof(IUIController))]
-    [PartCreationPolicy(CreationPolicy.NonShared)]
-    public class UIController : IUIController, IDisposable
+    using App.Factories;
+    using StateMachineType = StateMachine<UIViewType, UIController.Trigger>;
+
+    public class UIController : IUIController
     {
         internal enum Trigger
         {
             None,
             Cancel,
             Next,
-            PRList,
-            PRDetail,
-            PRCreation,
+            Reload,
             Finish
         }
 
         readonly IUIFactory factory;
-        readonly IUIProvider uiProvider;
+        readonly IGitHubServiceProvider gitHubServiceProvider;
         readonly IRepositoryHosts hosts;
         readonly IConnectionManager connectionManager;
 
@@ -111,16 +105,22 @@ namespace GitHub.Controllers
 
         // holds state machines for each of the individual ui flows
         // does not load UI, merely tracks valid transitions
-        readonly Dictionary<UIControllerFlow, StateMachine<UIViewType, Trigger>> machines;
-        readonly Dictionary<UIControllerFlow, Dictionary<UIViewType, IUIPair>> uiObjects;
+        readonly Dictionary<UIControllerFlow, StateMachineType> machines =
+             new Dictionary<UIControllerFlow, StateMachineType>();
+
+        readonly Dictionary<UIControllerFlow, Dictionary<UIViewType, IUIPair>> uiObjects =
+             new Dictionary<UIControllerFlow, Dictionary<UIViewType, IUIPair>>();
 
         // loads UI for each state corresponding to a view type
         // queries the individual ui flow (stored in machines) for the next state
         // for a given transition trigger
         readonly StateMachineType uiStateMachine;
-        readonly Dictionary<Trigger, StateMachineType.TriggerWithParameters<ViewWithData>> triggers;
+
+        readonly Dictionary<Trigger, StateMachineType.TriggerWithParameters<ViewWithData>> triggers =
+             new Dictionary<Trigger, StateMachineType.TriggerWithParameters<ViewWithData>>();
 
         Subject<LoadData> transition;
+        public IObservable<LoadData> TransitionSignal => transition;
 
         // the main ui flow that this ui controller was set up to control
         UIControllerFlow mainFlow;
@@ -138,15 +138,22 @@ namespace GitHub.Controllers
         ViewWithData requestedTarget;
         bool stopping;
 
-        [ImportingConstructor]
-        public UIController(IUIProvider uiProvider, IRepositoryHosts hosts, IUIFactory factory,
+        public UIController(IGitHubServiceProvider serviceProvider)
+            : this(serviceProvider,
+                   serviceProvider.TryGetService<IRepositoryHosts>(),
+                   serviceProvider.TryGetService<IUIFactory>(),
+                   serviceProvider.TryGetService<IConnectionManager>())
+        {
+        }
+
+        public UIController(IGitHubServiceProvider gitHubServiceProvider,
+            IRepositoryHosts hosts, IUIFactory factory,
             IConnectionManager connectionManager)
         {
             this.factory = factory;
-            this.uiProvider = uiProvider;
+            this.gitHubServiceProvider = gitHubServiceProvider;
             this.hosts = hosts;
             this.connectionManager = connectionManager;
-            uiObjects = new Dictionary<UIControllerFlow, Dictionary<UIViewType, IUIPair>>();
 
 #if DEBUG
             if (Application.Current != null && !Splat.ModeDetector.InUnitTestRunner())
@@ -164,19 +171,21 @@ namespace GitHub.Controllers
                 }
             }
 #endif
-            machines = new Dictionary<UIControllerFlow, StateMachine<UIViewType, Trigger>>();
             ConfigureLogicStates();
 
             uiStateMachine = new StateMachineType(UIViewType.None);
-            triggers = new Dictionary<Trigger, StateMachineType.TriggerWithParameters<ViewWithData>>();
 
             ConfigureUIHandlingStates();
 
         }
 
-        public IObservable<LoadData> SelectFlow(UIControllerFlow choice)
+        public IObservable<LoadData> Configure(UIControllerFlow choice,
+            [AllowNull] IConnection conn = null,
+            [AllowNull] ViewWithData parameters = null)
         {
+            connection = conn;
             mainFlow = choice;
+            requestedTarget = parameters;
 
             transition = new Subject<LoadData>();
             transition.Subscribe(_ => {}, _ => Fire(Trigger.Next));
@@ -196,13 +205,12 @@ namespace GitHub.Controllers
             return completion;
         }
 
-        public void Start([AllowNull] IConnection conn)
+        public void Start()
         {
-            connection = conn;
             if (connection != null)
             {
                 if (mainFlow != UIControllerFlow.Authentication)
-                    uiProvider.AddService(this, connection);
+                    gitHubServiceProvider.AddService(this, connection);
                 else // sanity check: it makes zero sense to pass a connection in when calling the auth flow
                     Debug.Assert(false, "Calling the auth flow with a connection makes no sense!");
 
@@ -227,7 +235,7 @@ namespace GitHub.Controllers
                             if (loggedin) // register the first available connection so the viewmodel can use it
                             {
                                 connection = c;
-                                uiProvider.AddService(this, c);
+                                gitHubServiceProvider.AddService(this, c);
                             }
                             else
                             {
@@ -239,7 +247,7 @@ namespace GitHub.Controllers
                                     {
                                         connection = e.NewItems[0] as IConnection;
                                         if (connection != null)
-                                            uiProvider.AddService(typeof(IConnection), this, connection);
+                                            gitHubServiceProvider.AddService(typeof(IConnection), this, connection);
                                     }
                                 };
                                 connectionManager.Connections.CollectionChanged += connectionAdded;
@@ -256,17 +264,6 @@ namespace GitHub.Controllers
             }
         }
 
-        public void Jump(ViewWithData where)
-        {
-            Debug.Assert(where.ActiveFlow == mainFlow, "Jump called for flow " + where.ActiveFlow + " but this is " + mainFlow);
-            if (where.ActiveFlow != mainFlow)
-                return;
-
-            requestedTarget = where;
-            if (activeFlow == where.ActiveFlow)
-                Fire(Trigger.Next, where);
-        }
-
         public void Stop()
         {
             if (stopping || transition == null)
@@ -275,6 +272,11 @@ namespace GitHub.Controllers
             Debug.WriteLine("Stopping {0} ({1})", activeFlow + (activeFlow != mainFlow ? " and " + mainFlow : ""), GetHashCode());
             stopping = true;
             Fire(Trigger.Finish);
+        }
+
+        public void Reload()
+        {
+            Fire(Trigger.Reload);
         }
 
         /// <summary>
@@ -292,6 +294,8 @@ namespace GitHub.Controllers
         /// </summary>
         void ConfigureUIHandlingStates()
         {
+            triggers.Add(Trigger.Next, uiStateMachine.SetTriggerParameters<ViewWithData>(Trigger.Next));
+
             uiStateMachine.Configure(UIViewType.None)
                 .OnEntry(tr => stopping = false)
                 .PermitDynamic(Trigger.Next, () =>
@@ -301,81 +305,23 @@ namespace GitHub.Controllers
                     })
                 .PermitDynamic(Trigger.Finish, () => Go(Trigger.Finish));
 
-            uiStateMachine.Configure(UIViewType.Clone)
-                .OnEntry(tr => RunView(UIViewType.Clone, CalculateDirection(tr)))
-                .PermitDynamic(Trigger.Next, () => Go(Trigger.Next))
-                .PermitDynamic(Trigger.Cancel, () => Go(Trigger.Cancel))
-                .PermitDynamic(Trigger.Finish, () => Go(Trigger.Finish));
-
-            uiStateMachine.Configure(UIViewType.Create)
-                .OnEntry(tr => RunView(UIViewType.Create, CalculateDirection(tr)))
-                .PermitDynamic(Trigger.Next, () => Go(Trigger.Next))
-                .PermitDynamic(Trigger.Cancel, () => Go(Trigger.Cancel))
-                .PermitDynamic(Trigger.Finish, () => Go(Trigger.Finish));
-
-            uiStateMachine.Configure(UIViewType.Publish)
-                .OnEntry(tr => RunView(UIViewType.Publish, CalculateDirection(tr)))
-                .PermitDynamic(Trigger.Next, () => Go(Trigger.Next))
-                .PermitDynamic(Trigger.Cancel, () => Go(Trigger.Cancel))
-                .PermitDynamic(Trigger.Finish, () => Go(Trigger.Finish));
-
-            uiStateMachine.Configure(UIViewType.PRList)
-                .OnEntry(tr => RunView(UIViewType.PRList, CalculateDirection(tr)))
-                .PermitDynamic(Trigger.Next, () => Go(Trigger.Next))
-                .PermitDynamic(Trigger.PRDetail, () => Go(Trigger.PRDetail))
-                .PermitDynamic(Trigger.PRCreation, () => Go(Trigger.PRCreation))
-                .PermitDynamic(Trigger.Cancel, () => Go(Trigger.Cancel))
-                .PermitDynamic(Trigger.Finish, () => Go(Trigger.Finish));
-
-            triggers.Add(Trigger.PRDetail, uiStateMachine.SetTriggerParameters<ViewWithData>(Trigger.PRDetail));
-            uiStateMachine.Configure(UIViewType.PRDetail)
-                .OnEntryFrom(triggers[Trigger.PRDetail], (arg, tr) => RunView(UIViewType.PRDetail, CalculateDirection(tr), arg))
-                .PermitDynamic(Trigger.Next, () => Go(Trigger.Next))
-                .PermitDynamic(Trigger.Cancel, () => Go(Trigger.Cancel))
-                .PermitDynamic(Trigger.Finish, () => Go(Trigger.Finish))
-                .OnExit(() => DisposeView(activeFlow, UIViewType.PRDetail));
-
-            uiStateMachine.Configure(UIViewType.PRCreation)
-                .OnEntry(tr => RunView(UIViewType.PRCreation, CalculateDirection(tr)))
-                .PermitDynamic(Trigger.Next, () => Go(Trigger.Next))
-                .PermitDynamic(Trigger.Cancel, () => Go(Trigger.Cancel))
-                .PermitDynamic(Trigger.Finish, () => Go(Trigger.Finish))
-                .OnExit(() => DisposeView(activeFlow, UIViewType.PRCreation));
-
-            uiStateMachine.Configure(UIViewType.Login)
-                .OnEntry(tr => RunView(UIViewType.Login, CalculateDirection(tr)))
-                .PermitDynamic(Trigger.Next, () => Go(Trigger.Next))
-                .PermitDynamic(Trigger.Cancel, () => Go(Trigger.Cancel))
-                .PermitDynamic(Trigger.Finish, () => Go(Trigger.Finish));
-
-            uiStateMachine.Configure(UIViewType.TwoFactor)
-                .OnEntry(tr => RunView(UIViewType.TwoFactor, CalculateDirection(tr)))
-                .PermitDynamic(Trigger.Next, () => Go(Trigger.Next))
-                .PermitDynamic(Trigger.Cancel, () => Go(Trigger.Cancel))
-                .PermitDynamic(Trigger.Finish, () => Go(Trigger.Finish));
-
-            uiStateMachine.Configure(UIViewType.Gist)
-                .OnEntry(tr => RunView(UIViewType.Gist, CalculateDirection(tr)))
-                .PermitDynamic(Trigger.Next, () => Go(Trigger.Next))
-                .PermitDynamic(Trigger.Cancel, () => Go(Trigger.Cancel))
-                .PermitDynamic(Trigger.Finish, () => Go(Trigger.Finish));
-
-            uiStateMachine.Configure(UIViewType.LogoutRequired)
-                .OnEntry(tr => RunView(UIViewType.LogoutRequired, CalculateDirection(tr)))
-                .PermitDynamic(Trigger.Next, () => Go(Trigger.Next))
-                .PermitDynamic(Trigger.Cancel, () => Go(Trigger.Cancel))
-                .PermitDynamic(Trigger.Finish, () => Go(Trigger.Finish));
-
-            uiStateMachine.Configure(UIViewType.StartPageClone)
-                .OnEntry(tr => RunView(UIViewType.StartPageClone, CalculateDirection(tr)))
-                .PermitDynamic(Trigger.Next, () => Go(Trigger.Next))
-                .PermitDynamic(Trigger.Cancel, () => Go(Trigger.Cancel))
-                .PermitDynamic(Trigger.Finish, () => Go(Trigger.Finish));
+            ConfigureEntriesExitsForView(UIViewType.Clone);
+            ConfigureEntriesExitsForView(UIViewType.Create);
+            ConfigureEntriesExitsForView(UIViewType.Publish);
+            ConfigureEntriesExitsForView(UIViewType.PRList);
+            ConfigureEntriesExitsForView(UIViewType.PRDetail);
+            ConfigureEntriesExitsForView(UIViewType.PRCreation);
+            ConfigureEntriesExitsForView(UIViewType.Login);
+            ConfigureEntriesExitsForView(UIViewType.TwoFactor);
+            ConfigureEntriesExitsForView(UIViewType.Gist);
+            ConfigureEntriesExitsForView(UIViewType.LogoutRequired);
+            ConfigureEntriesExitsForView(UIViewType.StartPageClone);
 
             uiStateMachine.Configure(UIViewType.End)
                 .OnEntryFrom(Trigger.Cancel, () => End(false))
                 .OnEntryFrom(Trigger.Next, () => End(true))
                 .OnEntryFrom(Trigger.Finish, () => End(true))
+                .OnEntryFrom(triggers[Trigger.Next], (arg, tr) => End(true))
                 // clear all the views and viewmodels created by a subflow
                 .OnExit(() =>
                 {
@@ -390,7 +336,7 @@ namespace GitHub.Controllers
 
                     if (activeFlow == mainFlow)
                     {
-                        uiProvider.RemoveService(typeof(IConnection), this);
+                        gitHubServiceProvider.RemoveService(typeof(IConnection), this);
                         transition.OnCompleted();
                         Reset();
                     }
@@ -420,13 +366,24 @@ namespace GitHub.Controllers
                 .Permit(Trigger.Finish, UIViewType.None);
         }
 
+        StateMachineType.StateConfiguration ConfigureEntriesExitsForView(UIViewType viewType)
+        {
+            return uiStateMachine.Configure(viewType)
+                .OnEntryFrom(triggers[Trigger.Next], (arg, tr) => RunView(tr.Destination, arg))
+                .OnEntry(tr => RunView(tr.Destination))
+                .PermitReentry(Trigger.Reload)
+                .Permit(Trigger.Next, UIViewType.End)
+                .Permit(Trigger.Cancel, UIViewType.End)
+                .Permit(Trigger.Finish, UIViewType.End);
+        }
+
         /// <summary>
         /// Configure all the logical state transitions for each of the
-        /// ui flows we support.
+        /// ui flows we support that have more than one view
         /// </summary>
         void ConfigureLogicStates()
         {
-            StateMachine<UIViewType, Trigger> logic;
+            StateMachineType logic;
 
             // no selected flow
             logic = new StateMachine<UIViewType, Trigger>(UIViewType.None);
@@ -452,131 +409,6 @@ namespace GitHub.Controllers
                 .Permit(Trigger.Next, UIViewType.None);
 
             machines.Add(UIControllerFlow.Authentication, logic);
-
-            // clone flow
-            logic = new StateMachine<UIViewType, Trigger>(UIViewType.None);
-            logic.Configure(UIViewType.None)
-                .Permit(Trigger.Next, UIViewType.Clone)
-                .Permit(Trigger.Finish, UIViewType.End);
-            logic.Configure(UIViewType.Clone)
-                .Permit(Trigger.Next, UIViewType.End)
-                .Permit(Trigger.Cancel, UIViewType.End)
-                .Permit(Trigger.Finish, UIViewType.End);
-            logic.Configure(UIViewType.End)
-                .Permit(Trigger.Next, UIViewType.None);
-            machines.Add(UIControllerFlow.Clone, logic);
-
-            // create flow
-            logic = new StateMachine<UIViewType, Trigger>(UIViewType.None);
-            logic.Configure(UIViewType.None)
-                .Permit(Trigger.Next, UIViewType.Create)
-                .Permit(Trigger.Finish, UIViewType.End);
-            logic.Configure(UIViewType.Create)
-                .Permit(Trigger.Next, UIViewType.End)
-                .Permit(Trigger.Cancel, UIViewType.End)
-                .Permit(Trigger.Finish, UIViewType.End);
-            logic.Configure(UIViewType.End)
-                .Permit(Trigger.Next, UIViewType.None);
-            machines.Add(UIControllerFlow.Create, logic);
-
-            // publish flow
-            logic = new StateMachine<UIViewType, Trigger>(UIViewType.None);
-            logic.Configure(UIViewType.None)
-                .Permit(Trigger.Next, UIViewType.Publish)
-                .Permit(Trigger.Finish, UIViewType.End);
-            logic.Configure(UIViewType.Publish)
-                .Permit(Trigger.Next, UIViewType.End)
-                .Permit(Trigger.Cancel, UIViewType.End)
-                .Permit(Trigger.Finish, UIViewType.End);
-            logic.Configure(UIViewType.End)
-                .Permit(Trigger.Next, UIViewType.None);
-            machines.Add(UIControllerFlow.Publish, logic);
-
-            // pr flow
-            logic = new StateMachine<UIViewType, Trigger>(UIViewType.None);
-            logic.Configure(UIViewType.None)
-                // allows jumping to a specific view
-                .PermitDynamic(Trigger.Next, () => 
-                    requestedTarget == null || requestedTarget.ViewType == UIViewType.None
-                        ? UIViewType.PRList
-                        : requestedTarget.ViewType)
-                .Permit(Trigger.Finish, UIViewType.End);
-
-            logic.Configure(UIViewType.PRList)
-                // allows jumping to a specific view or reload the current view
-                .PermitDynamic(Trigger.Next, () =>
-                    requestedTarget == null || requestedTarget.ViewType == UIViewType.None
-                        ? UIViewType.PRList
-                        : requestedTarget.ViewType)
-                .Permit(Trigger.PRDetail, UIViewType.PRDetail)
-                .Permit(Trigger.PRCreation, UIViewType.PRCreation)
-                .Permit(Trigger.Cancel, UIViewType.End)
-                .Permit(Trigger.Finish, UIViewType.End);
-
-            logic.Configure(UIViewType.PRDetail)
-                // allows jumping to a specific view or reload the current view
-                .PermitDynamic(Trigger.Next, () =>
-                    requestedTarget == null
-                        ? UIViewType.PRList
-                        : requestedTarget.ViewType == UIViewType.None
-                            ? UIViewType.PRDetail 
-                            : requestedTarget.ViewType)
-                .Permit(Trigger.Cancel, UIViewType.PRList)
-                .Permit(Trigger.Finish, UIViewType.End);
-
-            logic.Configure(UIViewType.PRCreation)
-                // allows jumping to a specific view or reload the current view
-                .PermitDynamic(Trigger.Next, () =>
-                    requestedTarget == null
-                        ? UIViewType.PRList
-                        : requestedTarget.ViewType == UIViewType.None
-                            ? UIViewType.PRDetail
-                            : requestedTarget.ViewType)
-                .Permit(Trigger.Cancel, UIViewType.PRList)
-                .Permit(Trigger.Finish, UIViewType.End);
-
-            logic.Configure(UIViewType.End)
-                .Permit(Trigger.Next, UIViewType.None);
-            machines.Add(UIControllerFlow.PullRequests, logic);
-
-            // gist flow
-            logic = new StateMachine<UIViewType, Trigger>(UIViewType.None);
-            logic.Configure(UIViewType.None)
-                .Permit(Trigger.Next, UIViewType.Gist)
-                .Permit(Trigger.Finish, UIViewType.End);
-            logic.Configure(UIViewType.Gist)
-                .Permit(Trigger.Next, UIViewType.End)
-                .Permit(Trigger.Cancel, UIViewType.End)
-                .Permit(Trigger.Finish, UIViewType.End);
-            logic.Configure(UIViewType.End)
-                .Permit(Trigger.Next, UIViewType.None);
-            machines.Add(UIControllerFlow.Gist, logic);
-
-            // logout required flow
-            logic = new StateMachine<UIViewType, Trigger>(UIViewType.None);
-            logic.Configure(UIViewType.None)
-                .Permit(Trigger.Next, UIViewType.LogoutRequired)
-                .Permit(Trigger.Finish, UIViewType.End);
-            logic.Configure(UIViewType.LogoutRequired)
-                .Permit(Trigger.Next, UIViewType.End)
-                .Permit(Trigger.Cancel, UIViewType.End)
-                .Permit(Trigger.Finish, UIViewType.End);
-            logic.Configure(UIViewType.End)
-                .Permit(Trigger.Next, UIViewType.None);
-            machines.Add(UIControllerFlow.LogoutRequired, logic);
-
-            // start page clone flow
-            logic = new StateMachine<UIViewType, Trigger>(UIViewType.None);
-            logic.Configure(UIViewType.None)
-                .Permit(Trigger.Next, UIViewType.StartPageClone)
-                .Permit(Trigger.Finish, UIViewType.End);
-            logic.Configure(UIViewType.StartPageClone)
-                .Permit(Trigger.Next, UIViewType.End)
-                .Permit(Trigger.Cancel, UIViewType.End)
-                .Permit(Trigger.Finish, UIViewType.End);
-            logic.Configure(UIViewType.End)
-                .Permit(Trigger.Next, UIViewType.None);
-            machines.Add(UIControllerFlow.StartPageClone, logic);
         }
 
         UIControllerFlow SelectActiveFlow()
@@ -588,21 +420,6 @@ namespace GitHub.Controllers
 
             var supportsGist = host?.SupportsGist ?? false;
             return supportsGist ? mainFlow : UIControllerFlow.LogoutRequired;
-        }
-
-        static LoadDirection CalculateDirection(StateMachineType.Transition tr)
-        {
-            if (tr.IsReentry)
-                return LoadDirection.None;
-            switch (tr.Trigger)
-            {
-                case Trigger.Cancel:
-                    return LoadDirection.Back;
-                case Trigger.None:
-                    return LoadDirection.None;
-                default:
-                    return LoadDirection.Forward;
-            }
         }
 
         /// <summary>
@@ -653,12 +470,11 @@ namespace GitHub.Controllers
             }
         }
 
-        void RunView(UIViewType viewType, LoadDirection direction, ViewWithData arg = null)
+        void RunView(UIViewType viewType, ViewWithData arg = null)
         {
             if (requestedTarget?.ViewType == viewType)
             {
                 arg = requestedTarget;
-                requestedTarget = null;
             }
 
             if (arg == null)
@@ -667,9 +483,9 @@ namespace GitHub.Controllers
             var view = GetObjectsForFlow(activeFlow)[viewType].View;
             transition.OnNext(new LoadData
             {
+                Flow = activeFlow,
                 View = view,
-                Data = arg,
-                Direction = direction
+                Data = arg
             });
 
             // controller might have been stopped in the OnNext above
@@ -718,18 +534,6 @@ namespace GitHub.Controllers
                 pair.AddHandler(view.Done
                     .ObserveOn(RxApp.MainThreadScheduler)
                     .Subscribe(_ => Fire(uiStateMachine.CanFire(Trigger.Next) ? Trigger.Next : Trigger.Finish)));
-
-                var cv = view as IHasCreationView;
-                if (cv != null)
-                    pair.AddHandler(cv.Create
-                        .ObserveOn(RxApp.MainThreadScheduler)
-                        .Subscribe(_ => Fire(Trigger.PRCreation)));
-
-                var dv = view as IHasDetailView;
-                if (dv != null)
-                    pair.AddHandler(dv.Open
-                        .ObserveOn(RxApp.MainThreadScheduler)
-                        .Subscribe(x => Fire(Trigger.PRDetail, x)));
             }
 
             pair.AddHandler(view.Cancel
@@ -802,7 +606,7 @@ namespace GitHub.Controllers
         void Fire(Trigger next, ViewWithData arg = null)
         {
             Debug.WriteLine("Firing {0} from {1} ({2})", next, uiStateMachine.State, GetHashCode());
-            if (arg != null && triggers.ContainsKey(next))
+            if (triggers.ContainsKey(next))
                 uiStateMachine.Fire(triggers[next], arg);
             else
                 uiStateMachine.Fire(next);
